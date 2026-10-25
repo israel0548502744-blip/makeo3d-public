@@ -30,8 +30,10 @@ jobs:
           curl -fsSL "https://api.github.com/repos/$SRC/releases/tags/$TAG" > src.json
           name=$(jq -r .name src.json)
           jq -r .body src.json > notes.txt
+          # Only app builds are marked "latest": the app's updater reads the latest release.
+          latest=false; [[ "$TAG" == apk-* ]] && latest=true
           gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
-            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "$name" --notes-file notes.txt --latest=false
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "$name" --notes-file notes.txt --latest=$latest
           have=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[] | "\(.name) \(.size)"')
           jq -r '.assets[] | "\(.name) \(.size) \(.browser_download_url)"' src.json | while read -r f size url; do
             if grep -qx "$f $size" <<<"$have"; then echo "skip $f"; continue; fi
