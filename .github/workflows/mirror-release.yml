@@ -1,0 +1,44 @@
+name: Copy a release into this repository
+
+# Copies one release (all its files) from the app's source repository, one file at a time so
+# the 7 GB TripoSG pack fits on the runner's disk.
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag to copy (e.g. models-v1)"
+        required: true
+      source:
+        description: "Repository to copy from"
+        default: "israel0548502744-blip/Makeo3D"
+
+permissions:
+  contents: write
+
+jobs:
+  copy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TAG: ${{ inputs.tag }}
+      SRC: ${{ inputs.source }}
+    steps:
+      - name: Copy files
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://api.github.com/repos/$SRC/releases/tags/$TAG" > src.json
+          name=$(jq -r .name src.json)
+          jq -r .body src.json > notes.txt
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --title "$name" --notes-file notes.txt --latest=false
+          have=$(gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets[] | "\(.name) \(.size)"')
+          jq -r '.assets[] | "\(.name) \(.size) \(.browser_download_url)"' src.json | while read -r f size url; do
+            if grep -qx "$f $size" <<<"$have"; then echo "skip $f"; continue; fi
+            echo "copy $f ($((size >> 20)) MB)"
+            curl -fsSL --retry 5 -o "$f" "$url"
+            [ "$(stat -c %s "$f")" = "$size" ] || { echo "size mismatch $f"; exit 1; }
+            gh release upload "$TAG" "$f" -R "$GITHUB_REPOSITORY" --clobber
+            rm -f "$f"
+          done
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" --json assets -q '.assets | length'
